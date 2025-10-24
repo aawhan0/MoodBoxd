@@ -10,6 +10,10 @@ def root():
 @app.get("/scrape/{username}")
 def scrape_user(username: str):
     films = scrape_letterboxd_movies(username)
-    if films is None:
-        raise HTTPException(status_code=404, detail="User not found or unable to scrape data.")
-    return {"username": username, "movies": films}
+    if not films:
+        raise HTTPException(status_code=404, detail="User not found/ profile is private/ or unable to scrape data.")
+    return {
+        "username": username,
+        "count": len(films),
+        "films": films
+    }

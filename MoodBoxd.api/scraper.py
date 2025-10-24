@@ -3,7 +3,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import TimeoutException, WebDriverException, NoSuchElementException
 import time
 
 # --- Paths ---
@@ -26,35 +26,64 @@ def scrape_letterboxd_movies(username):
     service = Service(CHROMEDRIVER_PATH)
     driver = None
     movies = []
+    page_num = 1
 
     try:
         driver = webdriver.Chrome(service=service, options=options)
-        url = f"https://letterboxd.com/{username}/films/"
-        print(f"Loading {url}...")
-        driver.get(url)
 
-        wait = WebDriverWait(driver, 20)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.poster-grid")))
-
-        # Scroll to load more movies (useful for long lists)
-        last_height = driver.execute_script("return document.body.scrollHeight")
         while True:
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
-            new_height = driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height:
+            url = f"https://letterboxd.com/{username}/films/page/{page_num}/"
+            print(f"Loading page {page_num}: {url}")
+            driver.get(url)
+
+            wait = WebDriverWait(driver, 20)
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.poster-grid")))
+
+            # Scroll to load all movie posters on current page
+            last_height = driver.execute_script("return document.body.scrollHeight")
+            for _ in range(3):  # scroll down a few times to ensure loading
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(1.5)
+                new_height = driver.execute_script("return document.body.scrollHeight")
+                if new_height == last_height:
+                    break
+                last_height = new_height
+
+            # Grab all movies on this page
+            movie_entries = driver.find_elements(By.CSS_SELECTOR, "div.poster-grid li.griditem")
+
+            for entry in movie_entries:
+                img = entry.find_element(By.CSS_SELECTOR, "img.image")
+                title = img.get_attribute("alt")
+                poster_url = img.get_attribute("src")
+
+                try:
+                    rating_span = entry.find_element(By.CSS_SELECTOR, "span.rating")
+                    numeric_rating = None
+                    for c in rating_span.get_attribute("class").split():
+                        if c.startswith("rated-"):
+                            numeric_rating = int(c.replace("rated-", "")) / 2.0
+                            break
+                except:
+                    numeric_rating = None
+
+                movies.append({
+                    "title": title,
+                    "poster_url": poster_url,
+                    "user_rating": numeric_rating
+                })
+
+
+
+            # Check if "next" page exists; if not, break loop
+            try:
+                next_button = driver.find_element(By.CSS_SELECTOR, "a.next")
+                if not next_button.is_displayed():
+                    break
+            except NoSuchElementException:
                 break
-            last_height = new_height
 
-        # Grab all movies
-        movie_elements = driver.find_elements(By.CSS_SELECTOR, "div.poster-grid li.griditem img.image")
-        print(f"Found {len(movie_elements)} movies")
-
-        for elem in movie_elements:
-            title = elem.get_attribute("alt")
-            poster_url = elem.get_attribute("src")
-            if title:
-                movies.append({"title": title, "poster_url": poster_url})
+            page_num += 1
 
     except TimeoutException:
         print("Error: Page took too long to load or movies not found.")
