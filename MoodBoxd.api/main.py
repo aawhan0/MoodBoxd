@@ -1,5 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from scraper import scrape_letterboxd_movies
+from enrichment import batch_enrich_movies
+import pandas as pd
+
 
 app = FastAPI(title= "MoodBoxd Scraper API", version="1.0")
 
@@ -15,5 +18,17 @@ def scrape_user(username: str):
     return {
         "username": username,
         "count": len(films),
-        "films": films
+        "movies": films
+    }
+
+@app.get("/scrape-enriched/{username}")
+def scrape_user_enriched(username: str):
+    films = scrape_letterboxd_movies(username)
+    if not films:
+        raise HTTPException(status_code=404, detail="User not found/ profile is private/ or unable to scrape data.")
+    enriched = batch_enrich_movies(films)
+    return {
+        "username": username,
+        "count": len(enriched),
+        "movies": enriched
     }
