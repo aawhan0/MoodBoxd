@@ -25,7 +25,10 @@ def scrape_user(username: str):
 def scrape_user_enriched(username: str):
     films = scrape_letterboxd_movies(username)
     if not films:
-        raise HTTPException(status_code=404, detail="User not found/ profile is private/ or unable to scrape data.")
+        raise HTTPException(
+            status_code=404,
+            detail="User not found, profile is private, or unable to scrape data."
+        )
     enriched = batch_enrich_movies(films)
     return {
         "username": username,

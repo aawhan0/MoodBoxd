@@ -5,20 +5,30 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException, NoSuchElementException
 import time
+import re
 
 # --- Paths ---
 BRAVE_PATH = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
 CHROMEDRIVER_PATH = "../docs/chromedriver.exe"  # relative to MoodBoxd.api directory
 
-# --- Scraper Function ---
+def clean_title(raw_title):
+    # Remove "Poster for "
+    title = re.sub(r'^Poster for ', '', raw_title, flags=re.IGNORECASE)
+    # Extract any year from the end, e.g. (2025)
+    year_match = re.search(r'\(\d{4}\)$', title)
+    year = year_match.group(0) if year_match else ""
+    # Remove year from title portion, trim whitespace
+    title_without_year = re.sub(r' *\(\d{4}\)$', '', title).strip()
+    # Rebuild cleaned title with year included
+    clean_title = f"{title_without_year} {year}".strip()
+    return clean_title
+
 def scrape_letterboxd_movies(username):
     options = webdriver.ChromeOptions()
     options.binary_location = BRAVE_PATH
     options.add_argument("--window-size=1920,1080")
-    # Keep visual for now (helps debug). Switch to headless later.
-    # options.add_argument("--headless")
+    # options.add_argument("--headless")  # Uncomment to run headless
 
-    # Make automation less detectable
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
@@ -30,7 +40,6 @@ def scrape_letterboxd_movies(username):
 
     try:
         driver = webdriver.Chrome(service=service, options=options)
-
         while True:
             url = f"https://letterboxd.com/{username}/films/page/{page_num}/"
             print(f"Loading page {page_num}: {url}")
@@ -39,9 +48,8 @@ def scrape_letterboxd_movies(username):
             wait = WebDriverWait(driver, 20)
             wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.poster-grid")))
 
-            # Scroll to load all movie posters on current page
             last_height = driver.execute_script("return document.body.scrollHeight")
-            for _ in range(3):  # scroll down a few times to ensure loading
+            for _ in range(3):
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(1.5)
                 new_height = driver.execute_script("return document.body.scrollHeight")
@@ -49,13 +57,13 @@ def scrape_letterboxd_movies(username):
                     break
                 last_height = new_height
 
-            # Grab all movies on this page
             movie_entries = driver.find_elements(By.CSS_SELECTOR, "div.poster-grid li.griditem")
 
             for entry in movie_entries:
                 img = entry.find_element(By.CSS_SELECTOR, "img.image")
-                title = img.get_attribute("alt")
+                raw_title = img.get_attribute("alt")
                 poster_url = img.get_attribute("src")
+                title = clean_title(raw_title)  # Clean title here
 
                 try:
                     rating_span = entry.find_element(By.CSS_SELECTOR, "span.rating")
@@ -73,9 +81,6 @@ def scrape_letterboxd_movies(username):
                     "user_rating": numeric_rating
                 })
 
-
-
-            # Check if "next" page exists; if not, break loop
             try:
                 next_button = driver.find_element(By.CSS_SELECTOR, "a.next")
                 if not next_button.is_displayed():
@@ -96,7 +101,6 @@ def scrape_letterboxd_movies(username):
             driver.quit()
     return movies
 
-# --- Run/Test Script ---
 if __name__ == "__main__":
     username = "aaawhan"  # Replace this
     movie_list = scrape_letterboxd_movies(username)

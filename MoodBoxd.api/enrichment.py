@@ -1,43 +1,51 @@
-import wikipedia
-import requests
+from imdb import IMDb
 import re
 import time
 
-def get_movie_wikipedia_metadata(title):
+# Initialize IMDbPY instance
+ia = IMDb()
+
+def clean_movie_title(raw_title):
+    # Remove "Poster for" or similar prefix
+    clean_title = re.sub(r'^Poster for ', '', raw_title, flags=re.IGNORECASE)
+    # Extract year from parentheses if present
+    year_match = re.search(r'\((\d{4})\)$', clean_title)
+    year = int(year_match.group(1)) if year_match else None
+    # Remove year from title for searching
+    title_without_year = re.sub(r' *\(\d{4}\)$', '', clean_title).strip()
+    return title_without_year, year
+
+def get_movie_imdb_metadata(raw_title):
+    title, year = clean_movie_title(raw_title)
     try:
-        # Step 1: Resolve movie's Wikipedia page (get canonical title)
-        page = wikipedia.page(title)
-        page_title = page.title
-
-        # Step 2: Fetch the raw wikitext source of that page
-        url = "https://en.wikipedia.org/w/api.php"
-        params = {
-            "action": "query",
-            "format": "json",
-            "prop": "revisions",
-            "titles": page_title,
-            "rvslots": "*",
-            "rvprop": "content"
-        }
-        response = requests.get(url, params=params)
-        data = response.json()
-        pages = data["query"]["pages"]
-        wikitext = next(iter(pages.values()))["revisions"][0]["slots"]["main"]["*"]
-
-        # Step 3: Extract details from the infobox using regex
-        def extract_field(field):
-            match = re.search(rf"\|\s*{field}\s*=\s*([^\n|]+)", wikitext, re.IGNORECASE)
-            return match.group(1).strip() if match else None
-
-        country = extract_field("country")
-        genre = extract_field("genre")
-        year = extract_field("released") or extract_field("release_date") or extract_field("year")
+        # Search movies using IMDbPY
+        search_results = ia.search_movie(title)
+        movie = None
+        # Try to find movie that matches the year (if year known)
+        for candidate in search_results:
+            if year:
+                if 'year' in candidate.keys() and candidate['year'] == year:
+                    movie = candidate
+                    break
+            else:
+                movie = candidate
+                break
+        if not movie:
+            return {"error": "No matching movie found in IMDb"}
+        # Fetch full movie info
+        ia.update(movie)
+        country = movie.get('countries', [None])[0]
+        genre = ', '.join(movie.get('genres', [])) if movie.get('genres') else None
+        year = movie.get('year', year)
+        imdb_id = movie.movieID
+        imdb_url = f"https://www.imdb.com/title/tt{imdb_id}/" if imdb_id else None
 
         return {
+            "title_imdb": movie.get('title'),
+            "year": year,
             "country": country,
             "genre": genre,
-            "year": year,
-            "wikipedia_url": page.url
+            "imdb_url": imdb_url
         }
     except Exception as e:
         return {"error": str(e)}
@@ -45,16 +53,12 @@ def get_movie_wikipedia_metadata(title):
 def batch_enrich_movies(movie_list):
     enriched = []
     for movie in movie_list:
-        title = movie.get("title")
-        if not title:
+        raw_title = movie.get('title')
+        if not raw_title:
             continue
-        meta = get_movie_wikipedia_metadata(title)
+        meta = get_movie_imdb_metadata(raw_title)
         full_record = movie.copy()
         full_record.update(meta)
         enriched.append(full_record)
-        time.sleep(1)  # Rate limit: 1 request per second
+        time.sleep(1)  # prevent overwhelming IMDbPY / IMDb servers
     return enriched
-
-# Standalone test
-if __name__ == "__main__":
-    print(get_movie_wikipedia_metadata("Inception"))
